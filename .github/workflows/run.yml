@@ -1,0 +1,35 @@
+name: TQQQ RST Bot Execution
+
+on:
+  schedule:
+    # 🌟 매일 한국 시간 밤 12시 (UTC 15:00)에 자동으로 실행합니다.
+    - cron: '0 15 * * *'
+  workflow_dispatch: # 🛠️ 언제든 원할 때 수동으로 실행할 수 있는 버튼을 활성화합니다.
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 저장소 코드 가져오기
+      uses: actions/checkout@v4
+
+    - name: 파이썬(Python) 환경 설정
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: 필수 라이브러리 설치
+      run: |
+        pip install yfinance requests pandas
+
+    - name: RST 프로그램 실행
+      # 🔒 금고(Secrets)에서 값을 꺼내 파이썬 프로그램에 안전하게 주입합니다.
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
+        MY_SHARES: ${{ secrets.MY_SHARES }}
+        MY_CASH: ${{ secrets.MY_CASH }}
+        MY_AVG_PRICE: ${{ secrets.MY_AVG_PRICE }}
+        BASE_AMOUNT: ${{ secrets.BASE_AMOUNT }}
+      run: python Rst_bot.py
