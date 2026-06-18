@@ -33,4 +33,5 @@ jobs:
         MY_AVG_PRICE: ${{ secrets.MY_AVG_PRICE }}
         BASE_AMOUNT: ${{ secrets.BASE_AMOUNT }}
         TAX_FREE_EXHAUSTED: ${{ secrets.TAX_FREE_EXHAUSTED }}
+        INITIAL_CASH: ${{ secrets.INITIAL_CASH }}
       run: python Rst_bot.py
