@@ -35,6 +35,8 @@ def run_rst_strategy():
     if df.empty:
         send_telegram_message("❌ TQQQ 데이터를 가져오지 못했습니다.")
         return
+
+    df = df[df['Close'].notna()]
         
     # 1. 기술적 지표 계산 (이평선)
     df['SMA5'] = df['Close'].rolling(window=5).mean()
