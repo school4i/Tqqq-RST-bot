@@ -35,8 +35,7 @@ def run_rst_strategy():
         send_telegram_message("❌ TQQQ 데이터를 가져오지 못했습니다.")
         return
     
-    # 🌟 [여기에 추가] 휴일이나 장 시작 전 끼어있는 공백(NaN) 행을 완벽하게 제거합니다.
-    df = df.dropna()
+    df = df[df['Close'].notna()]
         
     # 1. 기술적 지표 계산 (이평선)
     df['SMA5'] = df['Close'].rolling(window=5).mean()
