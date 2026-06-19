@@ -29,12 +29,14 @@ def send_telegram_message(message):
         print(f"메시지 전송 실패: {e}")
 
 def run_rst_strategy():
-    ticker = "TQQQ"
-    # RSI(14일) 계산을 위해 안전하게 6개월치 데이터를 가져옵니다.
+   ticker = "TQQQ"
     df = yf.download(ticker, period="6mo", interval="1d")
     if df.empty:
         send_telegram_message("❌ TQQQ 데이터를 가져오지 못했습니다.")
         return
+    
+    # 🌟 [여기에 추가] 휴일이나 장 시작 전 끼어있는 공백(NaN) 행을 완벽하게 제거합니다.
+    df = df.dropna()
         
     # 1. 기술적 지표 계산 (이평선)
     df['SMA5'] = df['Close'].rolling(window=5).mean()
