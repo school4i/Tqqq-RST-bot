@@ -3,7 +3,7 @@ name: TQQQ RST Bot Execution
 on:
   schedule:
     # 🌟 매일 한국 시간 밤 9시에 자동으로 실행합니다.
-    - cron: '0 13 * * 1-5'
+    - cron: '0 12 * * 1-5'
   workflow_dispatch: # 🛠️ 언제든 원할 때 수동으로 실행할 수 있는 버튼을 활성화합니다.
 
 jobs:
