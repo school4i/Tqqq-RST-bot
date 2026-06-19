@@ -29,7 +29,8 @@ def send_telegram_message(message):
         print(f"메시지 전송 실패: {e}")
 
 def run_rst_strategy():
-   ticker = "TQQQ"
+    ticker = "TQQQ"
+    # RSI(14일) 계산을 위해 안전하게 6개월치 데이터를 가져옵니다.
     df = yf.download(ticker, period="6mo", interval="1d")
     if df.empty:
         send_telegram_message("❌ TQQQ 데이터를 가져오지 못했습니다.")
