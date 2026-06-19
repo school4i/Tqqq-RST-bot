@@ -35,7 +35,8 @@ def run_rst_strategy():
     if df.empty:
         send_telegram_message("❌ TQQQ 데이터를 가져오지 못했습니다.")
         return
-
+        
+    # 🌟 [정밀 타격] 종가(Close)가 없는 휴일 데이터를 깨끗하게 지웁니다.
     df = df[df['Close'].notna()]
         
     # 1. 기술적 지표 계산 (이평선)
