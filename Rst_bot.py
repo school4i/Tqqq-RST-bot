@@ -162,15 +162,23 @@ def run_rst_strategy():
         if TAX_FREE_EXHAUSTED:
             msg_lines.append("📢 **[오늘 밤 주문]** 올해 양도세 면세 완료 상태이므로 세금 방어 **【 무조건 홀딩 】** 🔒")
         else:
-            is_selling_signal = (current_price < sma5_current) or (sma5_current < sma20_current)
-            if is_selling_signal:
+            # 🛠️ [백테스트 최적화 리팩토링 구현부]
+            # 1. 기존 조건: 5일선 붕괴 혹은 이평선 역배열 전환 (추세 이탈)
+            is_trend_broken = (current_price < sma5_current) or (sma5_current < sma20_current)
+            
+            # 2. 신규 무기: RSI 70 이상 폭발적 광기 진입 후, 오늘 자 종가가 5일선을 깨고 내려오며 꼭대기가 꺾일 때
+            is_rsi_overbought_signal = (rsi_current >= 70) and (current_price < sma5_current)
+            
+            if is_trend_broken or is_rsi_overbought_signal:
                 shares_to_sell = math.floor(MY_SHARES * 0.1)
                 if shares_to_sell > 0:
-                    msg_lines.append(f"🚨 **[오늘 밤 주문]** 메인 계좌 지정가 매도: 💰 **【 {shares_to_sell}주 분할 익절 】**")
+                    # 알림창에 어떤 필터에 걸려 익절이 나갔는지 원인을 브리핑합니다.
+                    reason_txt = "RSI 과열 후 꺾임" if is_rsi_overbought_signal else "추세 역배열 전환"
+                    msg_lines.append(f"🚨 **[오늘 밤 주문]** 메인 계좌 지정가 매도: 💰 **【 {shares_to_sell}주 분할 익절 】** ({reason_txt})")
                 else:
                     msg_lines.append("📢 **[오늘 밤 주문]** 매도 가능 수량 부족으로 **【 보유 유지 】**")
             else:
-                msg_lines.append("📢 **[오늘 밤 주문]** 추세 정배열 순항 중이므로 매도 없이 **【 즐겁게 홀딩 】** 📈")
+                msg_lines.append("📢 **[오늘 밤 주문]** 추세 정배열 순항 및 광기 유지 중이므로 매도 없이 **【 즐겁게 홀딩 】** 📈")
 
     send_telegram_message("\n".join(msg_lines))
 
