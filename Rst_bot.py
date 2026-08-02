@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-RST-Trend v3.1  |  TQQQ 매매 지령 봇 (GitHub Actions 전용)
+RST-Trend v3.2  |  TQQQ 매매 지령 봇 (GitHub Actions 전용)
 """
 
 import os
@@ -23,10 +23,9 @@ TICKER            = os.environ.get("TICKER", "TQQQ")
 STATE_FILE        = os.environ.get("STATE_FILE", "state.json")
 SIGNAL_LOG        = os.environ.get("SIGNAL_LOG", "signals.csv")
 
-# --- 전략 파라미터 (환경변수로 조정 가능) ---
+# --- 전략 파라미터 ---
 RSI_BUY_THRESHOLD = float(os.environ.get("RSI_BUY_THRESHOLD", 35.0))   
 FILTER_MIN_SCORE  = int(os.environ.get("FILTER_MIN_SCORE", 3))         
-# ✅ [수정 반영] 미체결 방지를 위해 LOC 체결가 버퍼를 3%로 상향
 LOC_PRICE_BUFFER  = float(os.environ.get("LOC_PRICE_BUFFER", 1.03))    
 SELL_RATIO        = float(os.environ.get("SELL_RATIO", 0.10))          
 ZONE_ANCHOR_MODE  = os.environ.get("ZONE_ANCHOR_MODE", "PEAK")         
@@ -105,7 +104,7 @@ def send_telegram_message(message, parse_mode="Markdown"):
 
 
 # ============================================================
-# 3. 데이터 수집 
+# 3. 데이터 수집
 # ============================================================
 def fetch_ohlcv(ticker, retries=3):
     import yfinance as yf
@@ -207,8 +206,7 @@ def run_rst_strategy():
     rsi_prev       = float(df["RSI"].iloc[-2])
     peak           = float(df["PEAK"].iloc[-1])
     
-    # ✅ [수정 반영] 액면분할 및 데이터 오류 감지 서킷브레이커 (전일 대비 -33% 하락 시)
-    # 나스닥이 하루에 11% 이상 빠져 TQQQ가 33% 하락하는 일은 역사적 폭락장 또는 액면분할일 확률이 높음.
+    # 액면분할 방어 스위치
     drop_from_prev = ((price - prev_price) / prev_price) * 100
     if drop_from_prev < -33.0:
         msg = f"🚨 *[긴급 차단]* 전일 대비 주가가 {drop_from_prev:.1f}% 폭락했습니다.\n" \
@@ -239,7 +237,7 @@ def run_rst_strategy():
     filter_pass = (score >= FILTER_MIN_SCORE) and checks["20일선 아래"]
 
     msg = [
-        "🤖 *[RST-Trend v3.1]* 매매 가이드",
+        "🤖 *[RST-Trend v3.2]* 매매 가이드",
         f"🗓 기준봉: `{meta['last_bar']}` (미국 직전 거래일)",
         f"📊 {TICKER} 종가: `${price:,.2f}` | RSI: `{rsi:.1f}`",
         f"📈 5일선: `${sma5:,.2f}` (전일 `${sma5_prev:,.2f}`) | 20일선: `${sma20:,.2f}`",
@@ -272,7 +270,13 @@ def run_rst_strategy():
 
     # 매수(물타기) 구간
     elif price < MY_AVG_PRICE:
-        zone_num, ratio, multiplier, zone_name = next((z for z in ZONE_TABLE if zone_drop > z[1]), ZONE_TABLE[-1])
+        # 🌟 [버그 수정] 언패킹 오류 해결을 위해 인덱스로 안전하게 접근합니다.
+        selected_zone = next((z for z in ZONE_TABLE if zone_drop > z[1]), ZONE_TABLE[-1])
+        zone_num = selected_zone[0]
+        ratio = selected_zone[2]
+        multiplier = selected_zone[3]
+        zone_name = selected_zone[4]
+        
         max_allowed = INITIAL_CASH * ratio
         remaining_in_zone = max(0.0, max_allowed - spent_cash)
 
@@ -316,7 +320,7 @@ def run_rst_strategy():
         else:
             msg.append("📢 *[오늘 밤 주문]* 추세 순항 중, 매도 없이 ➔ 【 즐겁게 홀딩 】 📈")
 
-    # 체결 시 갱신할 상태값 자동 계산
+    # 가계부 자동 계산 출력
     if action in ("BUY_NEW", "BUY_ADD") and order_qty > 0:
         n_shares = MY_SHARES + order_qty
         n_cash   = MY_CASH - order_cash
@@ -330,7 +334,6 @@ def run_rst_strategy():
     text = "\n".join(msg)
     send_telegram_message(text)
     
-    # 깃허브 액션에서 Commit 할 수 있도록 파일에 덮어쓰기
     state["last_bar_date"] = str(meta["last_bar"])
     save_state(state)
     log_signal({
