@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-RST-Trend v3.2  |  TQQQ 매매 지령 봇 (GitHub Actions 전용)
+RST-Trend v3.3  |  TQQQ 매매 지령 봇 (데이터 조회 에러 추적 기능 추가)
 """
 
 import os
@@ -23,7 +23,6 @@ TICKER            = os.environ.get("TICKER", "TQQQ")
 STATE_FILE        = os.environ.get("STATE_FILE", "state.json")
 SIGNAL_LOG        = os.environ.get("SIGNAL_LOG", "signals.csv")
 
-# --- 전략 파라미터 ---
 RSI_BUY_THRESHOLD = float(os.environ.get("RSI_BUY_THRESHOLD", 35.0))   
 FILTER_MIN_SCORE  = int(os.environ.get("FILTER_MIN_SCORE", 3))         
 LOC_PRICE_BUFFER  = float(os.environ.get("LOC_PRICE_BUFFER", 1.03))    
@@ -31,7 +30,6 @@ SELL_RATIO        = float(os.environ.get("SELL_RATIO", 0.10))
 ZONE_ANCHOR_MODE  = os.environ.get("ZONE_ANCHOR_MODE", "PEAK")         
 PEAK_WINDOW       = int(os.environ.get("PEAK_WINDOW", 252))            
 
-# --- 구간 정의 ---
 ZONE_TABLE = [
     (1,  -20.0, 0.20, 1, "구간 1 (0 ~ -20%)"),
     (2,  -40.0, 0.50, 2, "구간 2 (-20 ~ -40%)"),
@@ -42,7 +40,6 @@ ZONE_TABLE = [
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID        = os.environ.get("CHAT_ID")
-
 
 # ============================================================
 # 1. 상태 관리
@@ -68,7 +65,6 @@ def load_state():
             print(f"[state] 파싱 실패({type(e).__name__}) -> 환경변수 폴백")
     return defaults
 
-
 def save_state(state):
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -76,7 +72,6 @@ def save_state(state):
         print(f"[state] {STATE_FILE} 저장 완료")
     except Exception as e:
         print(f"[state] 저장 실패: {type(e).__name__}")
-
 
 # ============================================================
 # 2. 텔레그램
@@ -102,22 +97,28 @@ def send_telegram_message(message, parse_mode="Markdown"):
             if attempt < 2: time.sleep(2 ** attempt)
     return False
 
-
 # ============================================================
-# 3. 데이터 수집
+# 3. 데이터 수집 (🌟 상세 에러 추적 로직 추가)
 # ============================================================
 def fetch_ohlcv(ticker, retries=3):
     import yfinance as yf
+    last_error_msg = "알 수 없는 오류"
+    
     for i in range(retries):
         try:
             df = yf.Ticker(ticker).history(
                 period="2y", interval="1d", auto_adjust=False, repair=True
             )
             if df is not None and not df.empty and len(df) >= 60:
-                return df
+                return df, None
+            else:
+                last_error_msg = f"데이터가 비어있거나 봉 갯수가 부족합니다. (길이: {len(df) if df is not None else 0})"
         except Exception as e:
+            last_error_msg = f"{type(e).__name__}: {str(e)}"
             if i < retries - 1: time.sleep(5 * (i + 1))
-    return None
+            
+    # 재시도를 모두 실패하면 에러 메시지와 함께 반환
+    return None, last_error_msg
 
 def prepare_indicators(df):
     df = df[df["Close"].notna()].copy()
@@ -153,7 +154,6 @@ def validate_bar(df, state):
     is_duplicate = (str(last_bar) == state.get("last_bar_date", ""))
     return df, {"last_bar": last_bar, "today_et": today_et, "is_duplicate": is_duplicate}, None
 
-
 def log_signal(row):
     try:
         df = pd.DataFrame([row])
@@ -161,7 +161,6 @@ def log_signal(row):
         df.to_csv(SIGNAL_LOG, mode="a", header=header, index=False, encoding="utf-8-sig")
     except Exception as e:
         pass
-
 
 # ============================================================
 # 4. 메인 전략
@@ -177,10 +176,12 @@ def run_rst_strategy():
     ENTRY_PRICE  = float(state["entry_price"])
     TAX_FREE_EXHAUSTED = bool(state["tax_free_exhausted"])
 
-    raw = fetch_ohlcv(TICKER)
+    # 🌟 [수정 완료] 이제 에러 메시지도 함께 받아와서 텔레그램으로 쏩니다.
+    raw, fetch_err = fetch_ohlcv(TICKER)
     if raw is None:
-        send_telegram_message(f"❌ *{TICKER} 데이터 조회 실패*. 오늘 지령을 생성하지 못했습니다.")
-        raise RuntimeError("data fetch failed")
+        error_msg = f"❌ *{TICKER} 데이터 조회 실패*\n상세 원인: `{fetch_err}`\n\n(💡 팁: GitHub Actions에서 Run workflow를 눌러 수동 재실행 해보세요!)"
+        send_telegram_message(error_msg)
+        raise RuntimeError(f"data fetch failed: {fetch_err}")
 
     df = prepare_indicators(raw)
     df, meta, err = validate_bar(df, state)
@@ -194,7 +195,6 @@ def run_rst_strategy():
         )
         return
 
-    # 지표 스냅샷
     price          = float(df["Close"].iloc[-1])
     open_price     = float(df["Open"].iloc[-1])
     prev_price     = float(df["Close"].iloc[-2])
@@ -206,12 +206,10 @@ def run_rst_strategy():
     rsi_prev       = float(df["RSI"].iloc[-2])
     peak           = float(df["PEAK"].iloc[-1])
     
-    # 액면분할 방어 스위치
     drop_from_prev = ((price - prev_price) / prev_price) * 100
     if drop_from_prev < -33.0:
         msg = f"🚨 *[긴급 차단]* 전일 대비 주가가 {drop_from_prev:.1f}% 폭락했습니다.\n" \
-              f"액면분할(Stock Split) 또는 비정상 데이터가 의심되어 봇 가동을 전면 중단합니다.\n" \
-              f"확인 후 수동으로 state.json 평단/수량을 재조정하세요."
+              f"액면분할(Stock Split) 또는 비정상 데이터가 의심되어 봇 가동을 전면 중단합니다."
         send_telegram_message(msg)
         raise RuntimeError("Stock Split or Abnormal Price Drop Detected.")
 
@@ -237,7 +235,7 @@ def run_rst_strategy():
     filter_pass = (score >= FILTER_MIN_SCORE) and checks["20일선 아래"]
 
     msg = [
-        "🤖 *[RST-Trend v3.2]* 매매 가이드",
+        "🤖 *[RST-Trend v3.3]* 매매 가이드",
         f"🗓 기준봉: `{meta['last_bar']}` (미국 직전 거래일)",
         f"📊 {TICKER} 종가: `${price:,.2f}` | RSI: `{rsi:.1f}`",
         f"📈 5일선: `${sma5:,.2f}` (전일 `${sma5_prev:,.2f}`) | 20일선: `${sma20:,.2f}`",
@@ -255,7 +253,6 @@ def run_rst_strategy():
 
     action, order_qty, order_cash = "HOLD", 0, 0.0
 
-    # 무보유 상태 신규 진입 분기
     if MY_SHARES <= 0 or MY_AVG_PRICE <= 0:
         if filter_pass and MY_CASH > 0 and BASE_AMOUNT > 0:
             budget = min(BASE_AMOUNT, MY_CASH, INITIAL_CASH * ZONE_TABLE[0][2])
@@ -268,9 +265,7 @@ def run_rst_strategy():
         else:
             msg.append("📢 *[오늘 밤 주문]* 무보유 상태, 진입 신호 대기 ➔ 【 관망 】 ⏱️")
 
-    # 매수(물타기) 구간
     elif price < MY_AVG_PRICE:
-        # 🌟 [버그 수정] 언패킹 오류 해결을 위해 인덱스로 안전하게 접근합니다.
         selected_zone = next((z for z in ZONE_TABLE if zone_drop > z[1]), ZONE_TABLE[-1])
         zone_num = selected_zone[0]
         ratio = selected_zone[2]
@@ -300,7 +295,6 @@ def run_rst_strategy():
                 capped = " ⚠️구간한도로 축소" if budget < required - 1e-9 else ""
                 msg.append(f"🛒 *[오늘 밤 주문]* LOC 매수 ➔ 🚨 【 *{qty:,}주* 】 ({multiplier}배 가속{capped}) | 예상 `${order_cash:,.0f}`")
 
-    # 익절 구간
     else:
         is_dead_cross = (sma5_prev >= sma20_prev) and (sma5 < sma20)
         is_rsi_peak_out = (rsi_prev >= 70) and (rsi < rsi_prev) and (price < sma5) and (prev_price >= sma5_prev)
@@ -320,7 +314,6 @@ def run_rst_strategy():
         else:
             msg.append("📢 *[오늘 밤 주문]* 추세 순항 중, 매도 없이 ➔ 【 즐겁게 홀딩 】 📈")
 
-    # 가계부 자동 계산 출력
     if action in ("BUY_NEW", "BUY_ADD") and order_qty > 0:
         n_shares = MY_SHARES + order_qty
         n_cash   = MY_CASH - order_cash
